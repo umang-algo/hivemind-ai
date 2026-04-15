@@ -14,6 +14,10 @@ import secrets
 import threading
 import time
 import requests as http_requests
+import logging
+
+# Suppress AutoGen's outdated API key format warnings
+logging.getLogger("autogen.oai.client").setLevel(logging.ERROR)
 
 security = HTTPBasic()
 
