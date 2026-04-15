@@ -109,6 +109,17 @@ class CommentCreate(BaseModel):
     text: str
     time: str
 
+@app.get("/health")
+def health_check():
+    conn = get_db()
+    agent = conn.execute("SELECT status FROM agents WHERE id = 'agent-autogen'").fetchone()
+    conn.close()
+    return {
+        "status": "ok",
+        "server": "running",
+        "agent_autogen": dict(agent)["status"] if agent else "not_registered"
+    }
+
 @app.get("/api/issues")
 def get_issues():
     conn = get_db()
