@@ -65,9 +65,16 @@ def init_db():
         sample_agents = [
             ('ag-1', 'Claude Agent', 'Claude Code', 'busy', 'Cloud Runner #1', 47, 12, 'avatar-claude', 'C'),
             ('ag-2', 'Codex Bot', 'OpenAI Codex', 'idle', 'Staging Server', 31, 8, 'avatar-codex', 'K'),
+            ('agent-autogen', 'AutoGen Swarm', 'AutoGen GroupChat', 'idle', 'Render Cloud', 0, 0, 'avatar-claude', 'AG'),
         ]
         c.executemany("INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", sample_agents)
         
+    # Always ensure agent-autogen exists (upsert for existing DBs)
+    c.execute("SELECT id FROM agents WHERE id = 'agent-autogen'")
+    if not c.fetchone():
+        c.execute("INSERT INTO agents VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                  ('agent-autogen', 'AutoGen Swarm', 'AutoGen GroupChat', 'idle', 'Render Cloud', 0, 0, 'avatar-claude', 'AG'))
+
     conn.commit()
     conn.close()
 
