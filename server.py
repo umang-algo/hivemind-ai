@@ -133,7 +133,7 @@ def agent_solve_task(task):
 
         def message_monitor():
             last_count = 0
-            while monitor_state["running"]:
+            while monitor_state["running"] or last_count < len(groupchat.messages):
                 current_count = len(groupchat.messages)
                 if current_count > last_count:
                     for i in range(last_count, current_count):
@@ -144,9 +144,9 @@ def agent_solve_task(task):
                         # IMPLICIT STATE TRACKER: Agent Handoff detection
                         if author_name not in ["User_Proxy", "CEO", "System Workflow"]:
                             if author_name != monitor_state["active_agent"]:
-                                # 1. Mark previous agent phase as done with 8s delay
+                                # 1. Mark previous agent phase as done with 10s delay
                                 if monitor_state["active_subtask_id"]:
-                                    time.sleep(8)
+                                    time.sleep(10)
                                     agent_update_status(monitor_state["active_subtask_id"], 'done')
                                     agent_add_comment(task["id"], f"✅ {monitor_state['active_agent']} Phase Complete.", author="System Workflow")
                                 
@@ -162,6 +162,14 @@ def agent_solve_task(task):
                         if monitor_state["active_subtask_id"] and author_name not in ["User_Proxy", "CEO", "System Workflow"]:
                             agent_add_comment(monitor_state["active_subtask_id"], content, author=author_name)
 
+                        # Handle CEO termination
+                        if author_name == "CEO" and "TERMINATE" in content:
+                            if monitor_state["active_subtask_id"]:
+                                time_sleep_final = 10
+                                time.sleep(time_sleep_final)
+                                agent_update_status(monitor_state["active_subtask_id"], 'done')
+                                monitor_state["active_subtask_id"] = None
+
                     last_count = current_count
                 time.sleep(1)
 
@@ -171,8 +179,9 @@ def agent_solve_task(task):
         prompt_msg = f"Task: {task['title']}\\n\\nDescription: {task['desc']}"
         chat_result = user_proxy.initiate_chat(manager, message=prompt_msg)
         
+        # Stop flag but wait for monitor to finish all messages and sleeps
         monitor_state["running"] = False
-        mon_thread.join(timeout=5)
+        mon_thread.join(timeout=90) # Give it 90s to finish all 8s delays
         
         if hasattr(chat_result, 'chat_history') and len(chat_result.chat_history) > 0:
             final_msg = chat_result.chat_history[-1].get("content", "No content")
