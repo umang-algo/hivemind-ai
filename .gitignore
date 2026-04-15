@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg
+*.egg-info/
+dist/
+build/
+*.spec
+
+# Virtual environments
+.venv/
+env/
+venv/
+ENV/
+
+# SQLite database (do NOT commit — Render gives each instance persistent disk)
+database.db
+
+# macOS
+.DS_Store
+
+# Workspace (agent code execution output)
+workspace/
+
+# Environment variables — NEVER commit your secrets!
+.env
+*.env
+
+# IDE
+.idea/
+.vscode/
+*.swp

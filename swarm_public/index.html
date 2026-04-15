@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>AutoGen Swarm Live Chat</title>
+    <style>
+        body { margin:0; padding:0; background:#09090b; color:#fff; font-family:-apple-system, system-ui, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; display:flex; flex-direction:column; height:100vh; }
+        .header { background:#18181b; padding:16px 24px; border-bottom:1px solid #27272a; display:flex; justify-content:space-between; align-items:center; }
+        .header h1 { margin:0; font-size:18px; display:flex; align-items:center; gap:8px; }
+        .dot { width:10px; height:10px; background:#22c55e; border-radius:50%; box-shadow:0 0 10px #22c55e;}
+        .container { flex:1; overflow-y:auto; padding:32px; display:flex; flex-direction:column; gap:16px; margin: 0 auto; width: 100%; max-width: 900px; box-sizing: border-box;}
+        .bubble { max-width:85%; padding:16px 20px; border-radius:12px; font-size:14.5px; border:1px solid #3f3f46; margin-bottom:6px; line-height: 1.7; }
+        .bubble.human { align-self:flex-end; background:#4f46e5; border-color:#4338ca; }
+        .bubble.agent { align-self:flex-start; background:#27272a; }
+        .author { font-size:11px; text-transform:uppercase; margin-bottom:6px; font-weight:600; }
+        .human .author { color:#c7d2fe; }
+        .agent .author { color:#a1a1aa; }
+        pre { background:#18181b; padding:12px; border-radius:6px; overflow-x:auto; border:1px solid #3f3f46; color:#cbd5e1; font-family: monospace; }
+        code { font-family: monospace; }
+        
+        /* Styled Scrollbar */
+        ::-webkit-scrollbar { width: 10px; }
+        ::-webkit-scrollbar-track { background: #09090b; }
+        ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 5px; }
+        ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+        
+        .btn-clear { background:#ef4444; border:none; color:white; padding:6px 12px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer; }
+        .btn-clear:hover { background:#dc2626; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1><span class="dot"></span> Live Swarm Monitor <span id="issueIdDisplay" style="color:#71717a; font-weight:400; font-size:14px; margin-left:12px;"></span></h1>
+        <button id="clearChatBtn" class="btn-clear" style="display:none;">Clear Logs</button>
+    </div>
+    <div class="container" id="messages">
+        <div style="text-align:center; color:#71717a; margin-top:40px;">Fetching initial feed... Waiting for agents...</div>
+    </div>
+
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const issueId = urlParams.get('issueId');
+        
+        if (issueId) {
+            document.getElementById('issueIdDisplay').innerText = `[${issueId}]`;
+            
+            const clearBtn = document.getElementById('clearChatBtn');
+            clearBtn.style.display = 'block';
+            clearBtn.addEventListener('click', async () => {
+                await fetch(`/api/issues/${issueId}/comments`, { method: 'DELETE' });
+                document.getElementById('messages').innerHTML = '<div style="text-align:center; color:#71717a; margin-top:40px;">Logs successfully wiped.</div>';
+            });
+
+            function escapeHtml(s) { return String(s).replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+            setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/issues/${issueId}/comments`);
+                    const msgs = await res.json();
+                    
+                    const messagesDiv = document.getElementById('messages');
+                    const isAtBottom = messagesDiv.scrollHeight - messagesDiv.clientHeight <= messagesDiv.scrollTop + 50;
+
+                    if (msgs.length > 0) {
+                        messagesDiv.innerHTML = '';
+                        msgs.forEach(m => {
+                            const isUser = m.author === 'User_Proxy';
+                            let fmtText = escapeHtml(m.text).replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+                            
+                            messagesDiv.innerHTML += `
+                                <div class="bubble ${isUser ? 'human' : 'agent'}">
+                                    <div class="author">${escapeHtml(m.author)}</div>
+                                    <div style="white-space: pre-wrap;">${fmtText}</div>
+                                </div>
+                            `;
+                        });
+                        if (isAtBottom) {
+                            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+                        }
+                    } else if (msgs.length === 0 && !messagesDiv.innerHTML.includes('Logs successfully wiped')) {
+                        messagesDiv.innerHTML = '<div style="text-align:center; color:#71717a; margin-top:40px;">Waiting for agents...</div>';
+                    }
+                } catch(e) {}
+            }, 1000);
+        } else {
+            document.getElementById('messages').innerHTML = '<div style="text-align:center; color:#ef4444; margin-top:40px;">Error: No task ID provided.</div>';
+        }
+    </script>
+</body>
+</html>

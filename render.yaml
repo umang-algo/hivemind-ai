@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: hivemind-ai
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: bash start.sh
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false          # You will paste this value manually in Render dashboard
+      - key: ADMIN_USER
+        sync: false          # Set your login username in Render dashboard
+      - key: ADMIN_PASS
+        sync: false          # Set your login password in Render dashboard
+      - key: MULTICA_API_URL
+        value: http://localhost:8000/api  # Auto-resolves inside same process
