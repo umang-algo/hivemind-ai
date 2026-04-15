@@ -2,7 +2,10 @@ import time
 import requests
 import sys
 import os
-import autogen
+try:
+    import autogen
+except ImportError:
+    import ag2 as autogen
 import threading
 
 API_URL = os.environ.get("MULTICA_API_URL", "http://localhost:8000/api")

@@ -24,7 +24,7 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
         )
     return credentials.username
 
-app = FastAPI(title="Multica Backend", dependencies=[Depends(get_current_username)])
+app = FastAPI(title="Multica Backend")
 
 # Setup CORS
 app.add_middleware(
@@ -186,7 +186,7 @@ def delete_comments(issue_id: str):
 # Serve main Multica frontend
 app.mount("/static", StaticFiles(directory="public"), name="static")
 
-@app.get("/")
+@app.get("/", dependencies=[Depends(get_current_username)])
 def read_index():
     return FileResponse("public/index.html")
 
@@ -197,6 +197,6 @@ def read_styles():
 # Serve the Swarm Monitor UI under /swarm route
 app.mount("/swarm_ui", StaticFiles(directory="swarm_public"), name="swarm_public")
 
-@app.get("/swarm")
+@app.get("/swarm", dependencies=[Depends(get_current_username)])
 def read_swarm():
     return FileResponse("swarm_public/index.html")
