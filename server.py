@@ -59,22 +59,41 @@ def agent_update_status(issue_id, status):
             json={"status": status}, timeout=5)
     except: pass
 
+def agent_create_sub_ticket(title, desc, parent_id):
+    try:
+        res = http_requests.post(f"{API_BASE}/issues", json={
+            "title": f"↳ {title}", 
+            "desc": f"**Sub-Task of {parent_id}:**\n\n{desc}", 
+            "status": "in-progress", 
+            "priority": "high", 
+            "assignee": "agent-autogen"
+        }, timeout=5)
+        return res.json().get("id")
+    except: return None
+
 def agent_solve_task(task):
     """Run AutoGen swarm for a task. Falls back to simulation if no API key."""
     api_key = os.environ.get("OPENAI_API_KEY", "")
     if not api_key:
         # Simulation mode — no OpenAI key
-        agent_add_comment(task["id"], "🤖 AutoGen Swarm activated in **simulation mode** (no OPENAI_API_KEY set).\n\nTo enable real AI execution, add your `OPENAI_API_KEY` in Render → Environment Variables.", author="System")
-        time.sleep(3)
-        agent_add_comment(task["id"], "📊 Data Engineer: Fetching relevant data and writing analysis script...", author="Data_Engineer")
-        time.sleep(4)
-        agent_add_comment(task["id"], "🔍 Financial Analyst: Reviewed the data. Risk-reward looks favorable. Confidence: 87%.", author="Financial_Analyst")
-        time.sleep(3)
-        agent_add_comment(task["id"], "✅ QA Tester: Pass. All outputs verified within acceptable parameters.", author="QA_Tester")
-        time.sleep(2)
-        agent_add_comment(task["id"], "⚠️ Risk Manager: Risk Score 3/10 — Low risk. Proceed.", author="Risk_Manager")
-        time.sleep(2)
-        agent_add_comment(task["id"], f"📋 CEO Summary: The team has completed analysis of **{task['title']}**. All phases passed QA. Risk is low. Task is approved and complete.", author="CEO")
+        agent_add_comment(task["id"], "🤖 AutoGen Swarm activated in **simulation mode** (no OPENAI_API_KEY set).", author="System")
+        
+        phases = [
+            ("Data Engineering Phase", "Fetching relevant data and writing analysis script..."),
+            ("Financial Analysis Phase", "Reviewed the data. Risk-reward looks favorable. Confidence: 87%."),
+            ("QA Testing Phase", "Pass. All outputs verified within acceptable parameters."),
+            ("Risk Assessment Phase", "Risk Score 3/10 — Low risk. Proceed.")
+        ]
+        
+        for phase_title, comment in phases:
+            sub_id = agent_create_sub_ticket(phase_title, f"Tracking phase: {phase_title}", task["id"])
+            time.sleep(4)
+            agent_add_comment(task["id"], f"⚙️ Phase **{phase_title}** running...", author="System")
+            time.sleep(4)
+            agent_add_comment(task["id"], comment, author=phase_title.split()[0])
+            if sub_id: agent_update_status(sub_id, "done")
+
+        agent_add_comment(task["id"], f"📋 CEO Summary: The team has completed analysis of **{task['title']}**. Task is approved.", author="CEO")
         return
 
     try:
@@ -88,23 +107,28 @@ def agent_solve_task(task):
             code_execution_config={"work_dir": "workspace", "use_docker": False},
             human_input_mode="NEVER", max_consecutive_auto_reply=10, is_termination_msg=is_term
         )
+        
+        # Specialists first, CEO LAST
         agents_list = [
-            autogen.AssistantAgent("CEO", llm_config=llm_config, is_termination_msg=is_term,
-                system_message="You are the CEO. Synthesize findings in 1 sentence then say TERMINATE."),
             autogen.AssistantAgent("Data_Engineer", llm_config=llm_config, is_termination_msg=is_term,
-                system_message="You are a Data Engineer. Write python code ONCE. Max 1 sentence explanation."),
+                system_message="You are a Data Engineer. Write python code and explain in 1 sentence."),
             autogen.AssistantAgent("Financial_Analyst", llm_config=llm_config, is_termination_msg=is_term,
                 system_message="You are an Analyst. Provide exactly 1 sentence of analysis."),
             autogen.AssistantAgent("QA_Tester", llm_config=llm_config, is_termination_msg=is_term,
                 system_message="You are QA. Say Pass or Fail in 1 sentence."),
             autogen.AssistantAgent("Risk_Manager", llm_config=llm_config, is_termination_msg=is_term,
                 system_message="You are Risk Manager. Give a risk score in 1 sentence."),
+            autogen.AssistantAgent("CEO", llm_config=llm_config, is_termination_msg=is_term,
+                system_message="You are the CEO. Synthesize findings in 1 sentence then say TERMINATE to end the meeting."),
         ]
+        
         groupchat = autogen.GroupChat(
-            agents=[user_proxy] + agents_list, messages=[], max_round=6,
+            agents=[user_proxy] + agents_list, messages=[], max_round=8,
             speaker_selection_method="round_robin"
         )
         manager = autogen.GroupChatManager(groupchat=groupchat, llm_config=llm_config)
+
+        state = {"active_sub_id": None, "last_agent": None}
 
         def monitor():
             last = 0
@@ -112,14 +136,35 @@ def agent_solve_task(task):
                 cur = len(groupchat.messages)
                 for i in range(last, cur):
                     msg = groupchat.messages[i]
-                    agent_add_comment(task["id"], msg.get("content", ""), author=msg.get("name", "Agent"))
+                    name = msg.get("name", "Agent")
+                    content = msg.get("content", "")
+                    
+                    # Track phases with sub-tickets
+                    if name not in ["User_Proxy", "CEO"] and name != state["last_agent"]:
+                        if state["active_sub_id"]:
+                            agent_update_status(state["active_sub_id"], "done")
+                        state["active_sub_id"] = agent_create_sub_ticket(f"{name} Phase", f"System tracking for {name}", task["id"])
+                        state["last_agent"] = name
+                    
+                    agent_add_comment(task["id"], content, author=name)
+                    if state["active_sub_id"]:
+                        agent_add_comment(state["active_sub_id"], content, author=name)
+
                 last = cur
                 time.sleep(1)
-                if cur >= groupchat.max_round * 2: break
+                # Exit monitor if conversation ends or max rounds reached
+                if cur > 0 and "TERMINATE" in str(groupchat.messages[-1].get("content", "")):
+                    if state["active_sub_id"]:
+                        agent_update_status(state["active_sub_id"], "done")
+                    break
+                if cur >= 10: break
 
         t = threading.Thread(target=monitor, daemon=True)
         t.start()
         user_proxy.initiate_chat(manager, message=f"Task: {task['title']}\n\n{task['desc']}")
+        t.join(timeout=60)
+    except Exception as e:
+        agent_add_comment(task["id"], f"❌ AutoGen crashed: {e}", author="System")
     except Exception as e:
         agent_add_comment(task["id"], f"❌ AutoGen crashed: {e}", author="System")
 
