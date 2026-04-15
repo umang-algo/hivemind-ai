@@ -3,7 +3,7 @@ services:
     name: hivemind-ai
     env: python
     buildCommand: pip install -r requirements.txt
-    startCommand: bash start.sh
+    startCommand: python3 -m uvicorn server:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: OPENAI_API_KEY
         sync: false          # You will paste this value manually in Render dashboard

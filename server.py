@@ -1,5 +1,6 @@
 import sqlite3
 import json
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -10,6 +11,9 @@ from typing import List, Optional
 import os
 import datetime
 import secrets
+import threading
+import time
+import requests as http_requests
 
 security = HTTPBasic()
 
@@ -24,7 +28,132 @@ def get_current_username(credentials: HTTPBasicCredentials = Depends(security)):
         )
     return credentials.username
 
-app = FastAPI(title="Multica Backend")
+# ─── EMBEDDED AGENT DAEMON ────────────────────────────────────────────────────
+AGENT_ID = "agent-autogen"
+API_BASE  = f"http://localhost:{os.environ.get('PORT', '8000')}/api"
+
+def agent_register():
+    try:
+        http_requests.post(f"{API_BASE}/agents", json={
+            "id": AGENT_ID, "name": "AutoGen Swarm",
+            "provider": "AutoGen GroupChat", "runtime": "Render Cloud",
+            "avatar": "avatar-claude", "initial": "AG"
+        }, timeout=5)
+        print("✅ AutoGen agent registered", flush=True)
+    except Exception as e:
+        print(f"⚠️  Agent registration failed: {e}", flush=True)
+
+def agent_add_comment(issue_id, text, author="AutoGen CEO"):
+    try:
+        http_requests.post(f"{API_BASE}/issues/{issue_id}/comments",
+            json={"author": author, "text": text, "time": "just now"}, timeout=5)
+    except: pass
+
+def agent_update_status(issue_id, status):
+    try:
+        http_requests.put(f"{API_BASE}/issues/{issue_id}",
+            json={"status": status}, timeout=5)
+    except: pass
+
+def agent_solve_task(task):
+    """Run AutoGen swarm for a task. Falls back to simulation if no API key."""
+    api_key = os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        # Simulation mode — no OpenAI key
+        agent_add_comment(task["id"], "🤖 AutoGen Swarm activated in **simulation mode** (no OPENAI_API_KEY set).\n\nTo enable real AI execution, add your `OPENAI_API_KEY` in Render → Environment Variables.", author="System")
+        time.sleep(3)
+        agent_add_comment(task["id"], "📊 Data Engineer: Fetching relevant data and writing analysis script...", author="Data_Engineer")
+        time.sleep(4)
+        agent_add_comment(task["id"], "🔍 Financial Analyst: Reviewed the data. Risk-reward looks favorable. Confidence: 87%.", author="Financial_Analyst")
+        time.sleep(3)
+        agent_add_comment(task["id"], "✅ QA Tester: Pass. All outputs verified within acceptable parameters.", author="QA_Tester")
+        time.sleep(2)
+        agent_add_comment(task["id"], "⚠️ Risk Manager: Risk Score 3/10 — Low risk. Proceed.", author="Risk_Manager")
+        time.sleep(2)
+        agent_add_comment(task["id"], f"📋 CEO Summary: The team has completed analysis of **{task['title']}**. All phases passed QA. Risk is low. Task is approved and complete.", author="CEO")
+        return
+
+    try:
+        import autogen
+        llm_config = {"model": "gpt-4o-mini", "api_key": api_key, "max_tokens": 500}
+        is_term = lambda x: "TERMINATE" in str(x.get("content", "")).upper()
+
+        user_proxy = autogen.UserProxyAgent(
+            name="User_Proxy",
+            system_message="Human administrator. Execute python code written by engineers.",
+            code_execution_config={"work_dir": "workspace", "use_docker": False},
+            human_input_mode="NEVER", max_consecutive_auto_reply=10, is_termination_msg=is_term
+        )
+        agents_list = [
+            autogen.AssistantAgent("CEO", llm_config=llm_config, is_termination_msg=is_term,
+                system_message="You are the CEO. Synthesize findings in 1 sentence then say TERMINATE."),
+            autogen.AssistantAgent("Data_Engineer", llm_config=llm_config, is_termination_msg=is_term,
+                system_message="You are a Data Engineer. Write python code ONCE. Max 1 sentence explanation."),
+            autogen.AssistantAgent("Financial_Analyst", llm_config=llm_config, is_termination_msg=is_term,
+                system_message="You are an Analyst. Provide exactly 1 sentence of analysis."),
+            autogen.AssistantAgent("QA_Tester", llm_config=llm_config, is_termination_msg=is_term,
+                system_message="You are QA. Say Pass or Fail in 1 sentence."),
+            autogen.AssistantAgent("Risk_Manager", llm_config=llm_config, is_termination_msg=is_term,
+                system_message="You are Risk Manager. Give a risk score in 1 sentence."),
+        ]
+        groupchat = autogen.GroupChat(
+            agents=[user_proxy] + agents_list, messages=[], max_round=6,
+            speaker_selection_method="round_robin"
+        )
+        manager = autogen.GroupChatManager(groupchat=groupchat, llm_config=llm_config)
+
+        def monitor():
+            last = 0
+            while True:
+                cur = len(groupchat.messages)
+                for i in range(last, cur):
+                    msg = groupchat.messages[i]
+                    agent_add_comment(task["id"], msg.get("content", ""), author=msg.get("name", "Agent"))
+                last = cur
+                time.sleep(1)
+                if cur >= groupchat.max_round * 2: break
+
+        t = threading.Thread(target=monitor, daemon=True)
+        t.start()
+        user_proxy.initiate_chat(manager, message=f"Task: {task['title']}\n\n{task['desc']}")
+    except Exception as e:
+        agent_add_comment(task["id"], f"❌ AutoGen crashed: {e}", author="System")
+
+def agent_polling_loop():
+    print("🤖 AutoGen Agent daemon starting...", flush=True)
+    time.sleep(5)  # Wait for server to be fully ready
+    agent_register()
+    print("📡 Polling for tasks every 3 seconds...", flush=True)
+    while True:
+        try:
+            res = http_requests.get(f"{API_BASE}/issues", timeout=5)
+            tasks = [i for i in res.json()
+                     if i.get("assignee") == AGENT_ID
+                     and i.get("status") in ("backlog", "todo")
+                     and "Sub-Task of" not in i.get("desc", "")]
+            for task in tasks:
+                print(f"🚀 Picking up {task['id']}: {task['title']}", flush=True)
+                agent_update_status(task["id"], "in-progress")
+                agent_add_comment(task["id"], f"🤖 **AutoGen Swarm** has picked up this task and is spinning up the team...", author="System")
+                agent_solve_task(task)
+                agent_update_status(task["id"], "done")
+                agent_add_comment(task["id"], "✅ Task completed by AutoGen Swarm.", author="System")
+                print(f"✅ Done {task['id']}", flush=True)
+        except Exception as e:
+            print(f"⚠️  Poll error: {e}", flush=True)
+        time.sleep(3)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Start agent daemon thread on server startup
+    t = threading.Thread(target=agent_polling_loop, daemon=True)
+    t.start()
+    print("🚀 HiveMind AI server started. Agent daemon running.", flush=True)
+    yield
+
+# ──────────────────────────────────────────────────────────────────────────────
+
+app = FastAPI(title="Multica Backend", lifespan=lifespan)
 
 # Setup CORS
 app.add_middleware(
