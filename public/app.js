@@ -61,10 +61,25 @@ function updateAssigneeDropdown() {
   const select = document.getElementById('issueAssignee');
   if (!select) return;
   const currentValue = select.value;
-  select.innerHTML = `<option value="human">Umang Yadav</option>`;
-  state.agents.forEach(ag => {
+
+  // Always start with human + hardcoded AutoGen fallback
+  const fallbackAgents = [
+    { id: 'agent-autogen', name: '🤖 AutoGen Swarm' },
+  ];
+
+  select.innerHTML = `<option value="human">👤 Umang Yadav</option>`;
+
+  // Merge live API agents with fallbacks (avoid duplicates)
+  const liveIds = state.agents.map(a => a.id);
+  const merged = [
+    ...state.agents,
+    ...fallbackAgents.filter(f => !liveIds.includes(f.id))
+  ];
+
+  merged.forEach(ag => {
     select.innerHTML += `<option value="${ag.id}">${ag.name}</option>`;
   });
+
   if (currentValue) select.value = currentValue;
 }
 
